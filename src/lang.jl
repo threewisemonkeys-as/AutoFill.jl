@@ -99,6 +99,7 @@ invoke(op::ConstStr, input::ProgramState) = op.s
 
 unify(op1::ConstStr, op2::ConstStr, w_id::String) = op1 == op2 ? op1 : nothing
 
+replace_vars(op::ConstStr, mapping::Dict{String, Int}) = nothing
 
 # The string expression Loop(𝜆𝑤 : e) refers to concatenation of e1, e2, . . . , e𝑛, 
 # where e𝑖 is obtained from e by replacing all occurrences of 𝑤 by 𝑖. 𝑛 is the 
@@ -207,13 +208,21 @@ function invoke(op::Pos, input::AbstractString)
     if abs(c) > length(matches) return nothing end
     match = wrapped_index(matches, c)
 
-    len = length(match[1]) 
-    if match.offset == length(input) + 1 && len == 0 
-        return match.offset - 1
-    else
-        return match.offset + len
+    result = match.offset + length(match[1]) 
+    if result == length(input) + 1
+        result -= 1
     end
+
+    return result
 end
+
+[0, 1] => [1, 2]
+[1, 2] => [2, 3]
+[2, 3] => [3, 4]
+
+[0, 2]
+[1, 3]
+[2, 4]
 
 function wrapped_index(vec::Vector, index::Int)
     if index < 0
@@ -293,11 +302,28 @@ function ==(a::T, b::T) where T <: Op
     getfield.(Ref(a), f) == getfield.(Ref(b), f)
 end
 
+function ==(a::IntVar, b::IntVar)
+    return (
+        a.k1 == b.k1
+        && a.k2 == b.k2
+        && a.w_id == b.w_id
+    )
+end
+
+
 function hash(x::T, h::UInt) where T <: Op
     h = hash(:T, h)
     # for f in fieldnames(T) h = hash(f, h) end
     # return h
     return hash(getfield.(Ref(x), fieldnames(T)), h)
+end
+
+function hash(x::IntVar, h::UInt)
+    h = hash(:IntVar, h)
+    return hash(
+        (x.k1, x.k2, x.w_id),
+        h
+    )
 end
 
 loop_invariant_hash(x, h::UInt) = hash(x, h)

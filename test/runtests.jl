@@ -12,7 +12,7 @@ using Test
 
         (DataFrame([
             ("BTR KRNL WK CORN 15Z", "15Z"),
-            ("CAMP DRY DBL NDL 3.6 OZ", "3.6 OZ"),
+            ("CAMP DRY DBL NDL 36 OZ", "36 OZ"),
             ("CHORE BOY HD SC SPNG 1 PK", "1 PK"),
             ("FRENCH WORCESTERSHIRE 5 Z", "5 Z"),
             ("O F TOMATO PASTE 6 OZ", missing),

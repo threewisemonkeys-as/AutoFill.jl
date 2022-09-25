@@ -55,6 +55,10 @@ function unify(d1::DAG, d2::DAG, w_id::String, unification_cache::Dict{Edge, Set
     edge_expr_map = EdgeExprMap()
     t1 = length(d1.W) * length(d2.W)
     c1 = 1
+
+    # TODO: pre-compute hashes
+    # TODO: Only unify for equal length substrings
+
     for ((d1_ηₛ, d1_ηₜ), (d2_ηₛ, d2_ηₜ)) in Iterators.product(
         keys(d1.W), keys(d2.W)
     )
@@ -67,9 +71,9 @@ function unify(d1::DAG, d2::DAG, w_id::String, unification_cache::Dict{Edge, Set
 
         n1, n2 = [d1_ηₛ; d2_ηₛ], [d1_ηₜ; d2_ηₜ]
         if haskey(unification_cache,  n1 => n2)
-                push!(nodes, n1)
-                push!(nodes, n2)
-                push!(edges, n1 => n2)
+            push!(nodes, n1)
+            push!(nodes, n2)
+            push!(edges, n1 => n2)
             edge_expr_map[n1 => n2] = unification_cache[n1 => n2]
         else
             result = Set{Op}()
@@ -172,17 +176,42 @@ function dfs_backward_itr_from(dag::DAG, node::Node)
     return !isempty(paths) ? vcat.(paths, [[node]]) : nothing
 end
 
-function Base.iterate(dag::DAG)
+# function sample_from_path(path, dag)
+#     program_path = [
+#         dag.W[path[i] => path[i+1]] for i in 1:length(path) - 1
+#     ]
+
+# end
+
+# function sample_programs(dag)
+
+# end
+
+function unroll_path(path, dag)
+    program_path = [
+        dag.W[path[i] => path[i+1]] for i in 1:length(path) - 1
+    ]
+    return [
+        length(p) == 1 ? first(p) : Concatenate([p...])
+        for p in collect(Iterators.product(program_path...))
+    ]
+end
+
+function extract_programs(dag::DAG)
     paths = dfs_backward_itr_from(dag, dag.ηᵗ)
-    return if isnothing(paths) nothing 
-    else (package(paths[1], dag), (paths=paths, count=2))
-    end
+    if isnothing(paths) return nothing end
+    return reduce(vcat, [unroll_path(p, dag) for p in paths])    
+end
+
+function Base.iterate(dag::DAG)
+    programs = extract_programs(dag)
+    return (programs[1], (programs=programs, count=2))
 end
 
 Base.iterate(
     dag::DAG,
-    state::NamedTuple{(:paths, :count), Tuple{Vector{Path}, Int}}
-) = return state.count > length(state.paths) ? nothing : (
-    package(state.paths[state.count], dag),
-    (paths=state.paths, count=state.count + 1)
+    state
+) = return state.count > length(state.programs) ? nothing : (
+    state.programs[state.count],
+    (programs=state.programs, count=state.count + 1)
 )

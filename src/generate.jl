@@ -30,14 +30,29 @@ Cache() = Cache(Dict(), Dict(), Dict(), Dict())
 
 
 "Generates program that satisfies given I/O specs"
-function generate_programs(specs::ProgramSpec)
+function generate_programs(
+    specs::ProgramSpec,
+    max_samples_per_dag::Int = 100,
+    max_num::Int = 1
+)
     dags = [generate_dag(s...) for s in specs]
     # println([length([p for p in d]) for d in dags])
-    println("Done generating DAGs")
-    return [
-        p for d in dags for p in d
-        if all([invoke(p, s[1]) == s[2] for s in specs])
-    ]
+    # println("Done generating DAGs")
+    i = 0
+    programs = Vector{Op}()
+    for d in dags
+        for sample_idx in 1:max_samples_per_dag
+            p = sample(d)
+            if all([invoke(p, s[1]) == s[2] for s in specs])
+                push!(programs, p)
+                i += 1
+                if i >= max_num break end
+            end
+        end
+        if i >= max_num break end
+    end
+
+    return programs
 
     # isection = dags[1]
     # for d in dags[2:length(dags)]
@@ -56,7 +71,7 @@ function generate_dag(
 )
     cache = Cache()
 
-    println("Generating DAG")
+    # println("Generating DAG")
     η = Set([[i] for i in 1:length(output_part)])
     ηˢ = [0]
     ηᵗ = [length(output_part)]
@@ -119,24 +134,30 @@ function generate_loop(
 )
     new_W = W
     w_id = string("w", 0)
-    println("Creating unification cache")
+    # println("Creating unification cache")
     unification_cache = cache_unification(W, 0, length(output_part), w_id)
 
-    println("Unifying DAGs")
+    # println("Unifying DAGs")
     for k3 in 1:length(output_part)
         for k1 in 0:k3-1
             for k2 in k1+1:k3-1
-                Wl = filter(((k, v),) -> k1 <= k[1][1] && k[2][1] <= k2, W)
-                Wr = filter(((k, v),) -> k2 <= k[1][1] && k[2][1] <= k3, W)
-                dl = DAG(Set([[i] for i in k1:k2]), [k1], [k2], keys(Wl), Wl)
-                dr = DAG(Set([[i] for i in k2:k3]), [k2], [k3], keys(Wr), Wr)
-                unified_dag = unify(dl, dr, w_id, unification_cache)
-                for p in unified_dag
-                    t_loop = Loop(w_id, p)
-                    result = invoke(t_loop, input_state)
-                    if !isnothing(result) && length(result) > 1
-                        for r in findall(result, output_part)
-                            push!(new_W[[r.start - 1] => [r.stop]], t_loop)
+                if k2 - k1 == k3 - k2 == 1
+                    Wl = filter(((k, v),) -> k1 <= k[1][1] && k[2][1] <= k2, W)
+                    Wr = filter(((k, v),) -> k2 <= k[1][1] && k[2][1] <= k3, W)
+                    dl = DAG(Set([[i] for i in k1:k2]), [k1], [k2], keys(Wl), Wl)
+                    dr = DAG(Set([[i] for i in k2:k3]), [k2], [k3], keys(Wr), Wr)
+                    unified_dag = unify(dl, dr, w_id, unification_cache)
+                    subprograms = extract_programs(unified_dag)
+                    if isnothing(subprograms) continue end
+                    # println(k1, " ", k2, " ", k3, " ", length(subprograms))
+                    for (idx, p) in enumerate(subprograms)
+                        # println(idx, " / ", length(subprograms))
+                        t_loop = Loop(w_id, p)
+                        result = invoke(t_loop, input_state)
+                        if !isnothing(result) && length(result) > 1
+                            for r in findall(result, output_part)
+                                push!(new_W[[r.start - 1] => [r.stop]], t_loop)
+                            end
                         end
                     end
                 end
@@ -159,7 +180,7 @@ function cache_unification(
                     s2 = W[[k2] => [k3]]
                     t = length(s1) * length(s2)
                     counter = 0
-                    println(k1, " ", k2, " ", k3, " ", length(s1), " ", length(s2), " ", t) 
+                    # println(k1, " ", k2, " ", k3, " ", length(s1), " ", length(s2), " ", t) 
                     result = Set{Op}()
                     p_dict = Dict{UInt, Set{Op}}()
                     
@@ -176,7 +197,10 @@ function cache_unification(
                         if haskey(p_dict, p_hash)
                             for p1 in p_dict[p_hash]
                                 u = unify(p1, p2, w_id)
-                                if !isnothing(u) push!(result, u) end
+                                if !isnothing(u)
+                                    push!(result, u)
+                                    # println(AutoFill.invoke(Loop("w0", u), "International Conference on Machine Learning"))
+                                end
                             end
                         end
                     end
@@ -240,11 +264,15 @@ function generate_positions(
         rrs = join([token_to_r_string[tok] for tok in rr])
         r = Regex("(" * lrs * ")(" * rrs * ")")
 
-        # TODO: change to logic that chooses match according to index
-        # rather than using `findfirst`
         matches = collect(eachmatch(r, input_part))
         current_substring = SubString(input_part, kl, kr-1)
-        c = findfirst([m.match == current_substring for m in matches])
+        c = nothing
+        for (idx, match) in enumerate(matches)
+            if match.offset == index 
+                c = idx
+                break
+            end
+        end
         if isnothing(c) continue end
 
         to_toksetseq = ts -> [
@@ -252,8 +280,9 @@ function generate_positions(
             for t in ts
         ]
         lr, rr = to_toksetseq(lr), to_toksetseq(rr)
-        push!(result, PosSet(lr, rr, c,))
+        push!(result, PosSet(lr, rr, c))
         push!(result, PosSet(lr, rr, -(length(matches) + 1 - c)))
+        # println(r, " ", current_substring, " ", c, " ", index, " ", [m.match for m in matches], " ", PosSet(lr, rr, c), " ", loop_invariant_hash(PosSet(lr, rr, c)))
     end
 
     cache.pos[(input_part, index)] = result
